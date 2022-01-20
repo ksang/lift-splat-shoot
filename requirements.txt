@@ -1,0 +1,4 @@
+nuscenes-devkit 
+tensorboardX 
+efficientnet_pytorch==0.7.0
+torchvision

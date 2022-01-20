@@ -11,11 +11,11 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import matplotlib.patches as mpatches
 
-from .data import compile_data
-from .tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
+from data import compile_data
+from tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
                     SimpleLoss, get_val_info, add_ego, gen_dx_bx,
                     get_nusc_maps, plot_nusc_map)
-from .models import compile_model
+from models import compile_model
 
 
 def lidar_check(version,
@@ -236,7 +236,7 @@ def eval_model_iou(version,
 
     model = compile_model(grid_conf, data_aug_conf, outC=1)
     print('loading', modelf)
-    model.load_state_dict(torch.load(modelf))
+    model.load_state_dict(torch.load(modelf, map_location=device))
     model.to(device)
 
     loss_fn = SimpleLoss(1.0).cuda(gpuid)
@@ -293,10 +293,9 @@ def viz_model_preds(version,
     nusc_maps = get_nusc_maps(map_folder)
 
     device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
-
     model = compile_model(grid_conf, data_aug_conf, outC=1)
     print('loading', modelf)
-    model.load_state_dict(torch.load(modelf))
+    model.load_state_dict(torch.load(modelf, map_location=device))
     model.to(device)
 
     dx, bx, _ = gen_dx_bx(grid_conf['xbound'], grid_conf['ybound'], grid_conf['zbound'])
@@ -317,6 +316,7 @@ def viz_model_preds(version,
     model.eval()
     counter = 0
     with torch.no_grad():
+        # Data input see data.py -> SegmentationData / VisData(includes Lidar)
         for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
             out = model(imgs.to(device),
                     rots.to(device),

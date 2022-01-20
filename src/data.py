@@ -15,7 +15,7 @@ from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
 from glob import glob
 
-from .tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx
+from tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx
 
 
 class NuscData(torch.utils.data.Dataset):
@@ -193,6 +193,9 @@ class NuscData(torch.utils.data.Dataset):
         return torch.Tensor(img).unsqueeze(0)
 
     def choose_cams(self):
+        """ Choose camera according to configurations.
+            Returns a list of cameras.
+        """
         if self.is_train and self.data_aug_conf['Ncams'] < len(self.data_aug_conf['cams']):
             cams = np.random.choice(self.data_aug_conf['cams'], self.data_aug_conf['Ncams'],
                                     replace=False)

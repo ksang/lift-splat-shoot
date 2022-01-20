@@ -1,5 +1,24 @@
 # Lift, Splat, Shoot: Encoding Images From Arbitrary Camera Rigs by Implicitly Unprojecting to 3D
 
+This is forked from original implementation for the paper, with explanations and tiny modifications / comments.
+
+### Prerequisites
+
+- [direnv](https://direnv.net/), can be skipped by running commands in [.envrc](.envrc) manually.
+
+- [pyenv](https://github.com/pyenv/pyenv) with [pyenv-virtualenv](https://github.com/pyenv/pyenv-virtualenv) plugin. To install python 3.9.9 and create a virtual env based on it:
+    ```
+    pyenv install 3.9.9
+    pyenv virtualenv 3.9.9 `basename "$PWD"`
+    ```
+
+- Install dependencies
+    ```
+    pip install -r requirements.txt
+    ```
+
+### Original    
+
 PyTorch code for Lift-Splat-Shoot (ECCV 2020).
 
 **Lift, Splat, Shoot: Encoding Images From Arbitrary Camera Rigs by Implicitly Unprojecting to 3D**  

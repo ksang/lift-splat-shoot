@@ -9,7 +9,7 @@ from torch import nn
 from efficientnet_pytorch import EfficientNet
 from torchvision.models.resnet import resnet18
 
-from .tools import gen_dx_bx, cumsum_trick, QuickCumsum
+from tools import gen_dx_bx, cumsum_trick, QuickCumsum
 
 
 class Up(nn.Module):
@@ -49,11 +49,14 @@ class CamEncode(nn.Module):
         return x.softmax(dim=1)
 
     def get_depth_feat(self, x):
+        # Extract features from EfficientNet
         x = self.get_eff_depth(x)
-        # Depth
+        # Get hidden values with Depth
         x = self.depthnet(x)
 
+        # Get the depth distribution from hidden value logits
         depth = self.get_depth_dist(x[:, :self.D])
+        # c_d = a_d * c
         new_x = depth.unsqueeze(1) * x[:, self.D:(self.D + self.C)].unsqueeze(2)
 
         return depth, new_x
@@ -167,6 +170,7 @@ class LiftSplatShoot(nn.Module):
         """Determine the (x,y,z) locations (in the ego frame)
         of the points in the point cloud.
         Returns B x N x D x H/downsample x W/downsample x 3
+        Batch x N_imgs(camera) x Depth x Hight x Width x 3(RGB)
         """
         B, N, _ = trans.shape
 
@@ -191,6 +195,7 @@ class LiftSplatShoot(nn.Module):
         B, N, C, imH, imW = x.shape
 
         x = x.view(B*N, C, imH, imW)
+        # Encode input images with depth information
         x = self.camencode(x)
         x = x.view(B, N, self.camC, self.D, imH//self.downsample, imW//self.downsample)
         x = x.permute(0, 1, 3, 4, 5, 2)
@@ -242,15 +247,22 @@ class LiftSplatShoot(nn.Module):
         return final
 
     def get_voxels(self, x, rots, trans, intrins, post_rots, post_trans):
+        # Get geometry for this set of images from camera,
+        # This only requires metadata of the images and get those transformations,
+        # with non learnable operations.
         geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans)
+        # The actual "Lift" part model
         x = self.get_cam_feats(x)
-
+        # Pooling at voxel space, pillarize the point cloud data like PointPillars,
+        # non learnable operations
         x = self.voxel_pooling(geom, x)
 
         return x
 
     def forward(self, x, rots, trans, intrins, post_rots, post_trans):
+        # Lift + Voxel pooling
         x = self.get_voxels(x, rots, trans, intrins, post_rots, post_trans)
+        # Splat, standard CNN
         x = self.bevencode(x)
         return x
 
