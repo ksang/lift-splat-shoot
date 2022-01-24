@@ -70,18 +70,18 @@ class NuscData(torch.utils.data.Dataset):
                 if rec['channel'] == 'LIDAR_TOP' or (rec['is_key_frame'] and rec['channel'] in self.data_aug_conf['cams']):
                     rec['filename'] = info[rec['filename']]
 
-    
     def get_scenes(self):
-        # if returns all scenes
-        if self.is_full:
-            return create_splits_scenes()
-        # filter by scene split
-        split = {
+        split_map = {
             'v1.0-trainval': {True: 'train', False: 'val'},
             'v1.0-mini': {True: 'mini_train', False: 'mini_val'},
-        }[self.nusc.version][self.is_train]
-
-        scenes = create_splits_scenes()[split]
+        }        
+        # if returns all scenes
+        if self.is_full:
+            scenes = create_splits_scenes()[split_map[self.nusc.version][True]] + create_splits_scenes()[split_map[self.nusc.version][False]]
+        else:
+            # filter by scene split
+            split = split_map[self.nusc.version][self.is_train]
+            scenes = create_splits_scenes()[split]
 
         return scenes
 
@@ -282,7 +282,7 @@ def compile_data_inference(version, dataroot, data_aug_conf, grid_conf, bsz,
         'vizdata': VizData,
         'segmentationdata': SegmentationData,
     }[parser_name]
-    fulldata = parser(nusc, is_full=True, data_aug_conf=data_aug_conf, is_train=True,
+    fulldata = parser(nusc, is_full=True, data_aug_conf=data_aug_conf, is_train=False,
                          grid_conf=grid_conf)
     return torch.utils.data.DataLoader(fulldata, batch_size=bsz,
                                               shuffle=False,
