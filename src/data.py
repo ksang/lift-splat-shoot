@@ -14,7 +14,6 @@ from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.splits import create_splits_scenes
 from nuscenes.utils.data_classes import Box
 from glob import glob
-from itertools import chain
 
 from tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx
 
@@ -283,12 +282,7 @@ def compile_data_inference(version, dataroot, data_aug_conf, grid_conf, bsz,
                          grid_conf=grid_conf)
     valdata = parser(nusc, is_train=False, data_aug_conf=data_aug_conf,
                        grid_conf=grid_conf)
-
-    trainloader = torch.utils.data.DataLoader(traindata, batch_size=bsz,
+    fulldata = torch.utils.data.ConcatDataset([traindata, valdata])
+    return torch.utils.data.DataLoader(fulldata, batch_size=bsz,
                                               shuffle=False,
                                               num_workers=nworkers)
-    valloader = torch.utils.data.DataLoader(valdata, batch_size=bsz,
-                                            shuffle=False,
-                                            num_workers=nworkers)
-
-    return chain(trainloader, valloader)
