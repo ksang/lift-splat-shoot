@@ -19,9 +19,10 @@ from tools import get_lidar_data, img_transform, normalize_img, gen_dx_bx
 
 
 class NuscData(torch.utils.data.Dataset):
-    def __init__(self, nusc, is_train, data_aug_conf, grid_conf):
+    def __init__(self, nusc, is_train, data_aug_conf, grid_conf, is_full=False):
         self.nusc = nusc
         self.is_train = is_train
+        self.is_full = is_full
         self.data_aug_conf = data_aug_conf
         self.grid_conf = grid_conf
 
@@ -71,6 +72,9 @@ class NuscData(torch.utils.data.Dataset):
 
     
     def get_scenes(self):
+        # if returns all scenes
+        if self.is_full:
+            return create_splits_scenes()
         # filter by scene split
         split = {
             'v1.0-trainval': {True: 'train', False: 'val'},
@@ -278,11 +282,8 @@ def compile_data_inference(version, dataroot, data_aug_conf, grid_conf, bsz,
         'vizdata': VizData,
         'segmentationdata': SegmentationData,
     }[parser_name]
-    traindata = parser(nusc, is_train=True, data_aug_conf=data_aug_conf,
+    fulldata = parser(nusc, is_full=True, data_aug_conf=data_aug_conf, is_train=True,
                          grid_conf=grid_conf)
-    valdata = parser(nusc, is_train=False, data_aug_conf=data_aug_conf,
-                       grid_conf=grid_conf)
-    fulldata = torch.utils.data.ConcatDataset([traindata, valdata])
     return torch.utils.data.DataLoader(fulldata, batch_size=bsz,
                                               shuffle=False,
                                               num_workers=nworkers)
