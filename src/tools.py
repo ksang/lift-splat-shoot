@@ -13,6 +13,7 @@ from pyquaternion import Quaternion
 from PIL import Image
 from functools import reduce
 import matplotlib as mpl
+import cv2
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 from nuscenes.utils.data_classes import LidarPointCloud
@@ -80,9 +81,10 @@ def get_lidar_data(nusc, sample_rec, nsweeps, min_distance):
 def ego_to_cam(points, rot, trans, intrins):
     """Transform points (3 x N) from ego frame into a pinhole camera
     """
+    # Transform from world coordinate to camera coordinate 3D -> 3D (euclidian coordinates)
     points = points - trans.unsqueeze(1)
     points = rot.permute(1, 0).matmul(points)
-
+    # Transform from camera coordinate to image 3D -> 2D
     points = intrins.matmul(points)
     points[:2] /= points[2:3]
 
@@ -281,7 +283,7 @@ def add_ego(bx, dx):
     ])
     pts = (pts - bx) / dx
     pts[:, [0,1]] = pts[:, [1,0]]
-    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+    plt.fill(pts[:, 0], pts[:, 1], '#ff0000')
 
 
 def get_nusc_maps(map_folder):
@@ -313,10 +315,10 @@ def plot_nusc_map(rec, nusc_maps, nusc, scene2map, dx, bx):
             plt.fill(pts[:, 1], pts[:, 0], c=(0.5, 0.5, 0.5), alpha=0.2)
     for la in lmap['road_divider']:
         pts = (la - bx) / dx
-        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 0.0, 1.0), alpha=0.5)
+        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 1.0, 1.0), alpha=0.5)
     for la in lmap['lane_divider']:
         pts = (la - bx) / dx
-        plt.plot(pts[:, 1], pts[:, 0], c=(1.0, 0.0, 0.0), alpha=0.5)
+        plt.plot(pts[:, 1], pts[:, 0], c=(0.0, 1.0, 0.0), alpha=0.5)
 
 
 def get_local_map(nmap, center, stretch, layer_names, line_names):
@@ -370,3 +372,21 @@ def get_local_map(nmap, center, stretch, layer_names, line_names):
             polys[layer_name][rowi] = np.dot(polys[layer_name][rowi], rot)
 
     return polys
+
+def figure_to_opencv(curr_fig):
+    # redraw the canvas
+    curr_fig.canvas.draw()
+
+    # convert canvas to image
+    img = np.frombuffer(curr_fig.canvas.tostring_rgb(), dtype=np.uint8)
+    img  = img.reshape(curr_fig.canvas.get_width_height()[::-1] + (3,))
+
+    # img is rgb, convert to opencv's default bgr
+    return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+def project_points_ego_to_cam(points, rot, trans, intrins, post_rot, post_trans, W, H):
+    cam_points = ego_to_cam(points, rot, trans, intrins)
+    mask = get_only_in_img_mask(cam_points, H, W)
+    plot_pts = post_rot.matmul(cam_points) + post_trans.unsqueeze(1)
+
+    return plot_pts, mask

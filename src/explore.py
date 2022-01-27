@@ -5,16 +5,18 @@ Authors: Jonah Philion and Sanja Fidler
 """
 
 import torch
+import time
+import cv2
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 from PIL import Image
 import matplotlib.patches as mpatches
 
-from data import compile_data
+from data import compile_data, compile_data_inference
 from tools import (ego_to_cam, get_only_in_img_mask, denormalize_img,
                     SimpleLoss, get_val_info, add_ego, gen_dx_bx,
-                    get_nusc_maps, plot_nusc_map)
+                    get_nusc_maps, plot_nusc_map, figure_to_opencv, project_points_ego_to_cam)
 from models import compile_model
 
 
@@ -361,3 +363,141 @@ def viz_model_preds(version,
                 print('saving', imname)
                 plt.savefig(imname)
                 counter += 1
+
+def bev_segmentation(version,
+                    modelf,
+                    dataroot='/data/nuscenes',
+                    map_folder='/data/nuscenes/mini',
+                    output_file='output.mp4',
+                    gpuid=0,
+
+                    H=900, W=1600,
+                    resize_lim=(0.193, 0.225),
+                    final_dim=(128, 352),
+                    bot_pct_lim=(0.0, 0.22),
+                    rot_lim=(-5.4, 5.4),
+                    rand_flip=True,
+
+                    xbound=[-50.0, 50.0, 0.5],
+                    ybound=[-50.0, 50.0, 0.5],
+                    zbound=[-10.0, 10.0, 20.0],
+                    dbound=[4.0, 45.0, 1.0],
+
+                    bsz=4,
+                    nworkers=10,
+                    ):
+    grid_conf = {
+        'xbound': xbound,
+        'ybound': ybound,
+        'zbound': zbound,
+        'dbound': dbound,
+    }
+    cams = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT',
+            'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
+    data_aug_conf = {
+                    'resize_lim': resize_lim,
+                    'final_dim': final_dim,
+                    'rot_lim': rot_lim,
+                    'H': H, 'W': W,
+                    'rand_flip': rand_flip,
+                    'bot_pct_lim': bot_pct_lim,
+                    'cams': cams,
+                    'Ncams': 5,
+                }
+    loader = compile_data_inference(version, dataroot, data_aug_conf=data_aug_conf,
+                                          grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
+                                          parser_name='segmentationdata')
+    #_, loader = compile_data(version, dataroot, data_aug_conf=data_aug_conf,
+    #                                      grid_conf=grid_conf, bsz=bsz, nworkers=nworkers,
+    #                                      parser_name='segmentationdata')
+    nusc_maps = get_nusc_maps(map_folder)
+
+    device = torch.device('cpu') if gpuid < 0 else torch.device(f'cuda:{gpuid}')
+    model = compile_model(grid_conf, data_aug_conf, outC=1)
+    print('loading', modelf)
+    model.load_state_dict(torch.load(modelf, map_location=device))
+    model.to(device)
+
+    dx, bx, _ = gen_dx_bx(grid_conf['xbound'], grid_conf['ybound'], grid_conf['zbound'])
+    dx, bx = dx[:2].numpy(), bx[:2].numpy()
+
+    scene2map = {}
+    for rec in loader.dataset.nusc.scene:
+        log = loader.dataset.nusc.get('log', rec['log_token'])
+        scene2map[rec['name']] = log['location']
+
+
+    val = 0.01
+    fH, fW = final_dim
+    fig = plt.figure(figsize=(3*fW*val, (1.5*fW + 2*fH)*val))
+    gs = mpl.gridspec.GridSpec(3, 3, height_ratios=(fH, fH, 1.5*fW))
+    gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
+
+    model.eval()
+    counter = 0
+    out_video = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*'mp4v'), 10, (1056, 784))
+    frame_idx = 0
+    log_frame_num = 10
+    with torch.no_grad():
+        # Data input see data.py -> SegmentationData / VisData(includes Lidar)
+        start = time.time()
+        for batchi, (imgs, rots, trans, intrins, post_rots, post_trans, binimgs) in enumerate(loader):
+            out = model(imgs.to(device),
+                    rots.to(device),
+                    trans.to(device),
+                    intrins.to(device),
+                    post_rots.to(device),
+                    post_trans.to(device),
+                    )
+            out = out.sigmoid().cpu()
+            # Extract indices of points in world coordinates that prediction value is greater than 0.5
+            ego_points = torch.nonzero(out[0].squeeze(0) > 0.3) - 100
+            ego_points = torch.cat((ego_points, torch.full([ego_points.shape[0],1], -1, dtype=torch.long)), dim=1).T
+
+            for si in range(imgs.shape[0]):
+                plt.clf()
+                for imgi, img in enumerate(imgs[si]):
+                    ax = plt.subplot(gs[imgi // 3, imgi % 3])
+                    showimg = denormalize_img(img)
+                    cam_points = ego_to_cam(ego_points, rots[0][imgi], trans[0][imgi], intrins[0][imgi].T)
+                    plot_pts, mask = project_points_ego_to_cam(ego_points, rots[0][imgi], trans[0][imgi], intrins[0][imgi], post_rots[0][imgi], post_trans[0][imgi], W, H)
+                    plt.scatter(plot_pts[0, mask], plot_pts[1, mask], c='blue', s=5, alpha=0.5, cmap='jet')
+                    # flip the bottom images
+                    if imgi > 2:
+                        showimg = showimg.transpose(Image.FLIP_LEFT_RIGHT)
+                    plt.imshow(showimg)
+                    plt.axis('off')
+                    plt.annotate(cams[imgi].replace('_', ' '), (0.01, 0.92), xycoords='axes fraction', color='lime', fontweight='black', alpha=1)
+
+                ax = plt.subplot(gs[2, :], facecolor='black')
+                ax.get_xaxis().set_ticks([])
+                ax.get_yaxis().set_ticks([])
+                # plt.setp(ax.spines.values(), color='b', linewidth=2)
+                plt.legend(handles=[
+                    mpatches.Patch(color=(0.0, 0.0, 1.0, 1.0), label='Output Vehicle Segmentation'),
+                    mpatches.Patch(color=(1.0, 0.0, 0.0, 1.0), label='Ego Vehicle'),
+                    mpatches.Patch(color='#808080', label='Map (for visualization purposes only)')
+                ], loc=(0.01, 0.86))
+                plt.imshow(out[si].squeeze(0), vmin=0, vmax=1, cmap='Blues')
+
+                # plot static map (improves visualization)
+                rec = loader.dataset.ixes[counter]
+                plot_nusc_map(rec, nusc_maps, loader.dataset.nusc, scene2map, dx, bx)
+                plt.xlim((out.shape[3], 0))
+                plt.ylim((0, out.shape[3]))
+                add_ego(bx, dx)
+
+                #imname = f'eval{batchi:06}_{si:03}.jpg'
+                #print('saving', imname)
+                #plt.savefig(os.path.join("output", imname))
+                frame = figure_to_opencv(plt.gcf())
+                out_video.write(frame)
+                counter += 1
+                if counter > 0 and counter % log_frame_num == 0:
+                    end = time.time()
+                    seconds = end - start
+                    fps  = log_frame_num / seconds
+                    print("Estimated frames per second : {:.2f}, total frames : {}".format(fps, counter))
+                    start = time.time()
+    out_video.release()
+    print("Done, wrote to {}".format(output_file))
